@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS employees (
 --  hourly_cost REAL CHECK(hourly_cost >= 0),
     accept_replacement BOOLEAN DEFAULT 0,
     supervisor_id INTEGER REFERENCES employees(id) ON DELETE SET NULL,
-    notes TEXT
+    notes TEXT,
+    UNIQUE(first_name, last_name)
 );
 
 -- ========================================================

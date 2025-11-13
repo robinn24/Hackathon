@@ -1,4 +1,5 @@
 import time
+import os
 import json
 import requests
 import pdfplumber  # Pour lire les PDF
@@ -53,28 +54,25 @@ def extract_text_from_pdf(pdf_path):
 
 def call_mistral_for_sql(texte_contrat):
     """Appelle l'IA pour extraire les données ET générer une commande SQL."""
-    print("Appel de l'IA Mistral pour génération SQL...")
+    print("Appel de l'IA (Azure OpenAI Service) pour génération SQL...")
 
     # Ce prompt est la clé. Il demande à l'IA d'extraire ET de formater en SQL.
     prompt = f"""
-    Tu es un assistant RH expert en SQL. Analyse le contrat de travail suivant.
+    Tu es un assistant RH expert en SQL (SQLite). Analyse le contrat de travail suivant.
 
-    ÉTAPE 1 : Extrais les informations suivantes :
-    - nom
-    - prenom
-    - temps_de_travail (ex: "35" ou "20")
-    - type_de_contrat (ex: "CDI", "CDD")
-    - salaire_horaire (un nombre, ex: 15.5)
-    - disponibilite (ex: "Lundi-Vendredi" ou date de début "2024-01-01")
+    ÉTAPE 1 : Extrais les informations suivantes en te basant sur le contrat :
+    - first_name: Le prénom de l'employé.
+    - last_name: Le nom de famille de l'employé.
+    - weekly_hours_max: Le temps de travail hebdomadaire (juste le nombre, ex: 35).
+    - contract_type: Le type de contrat. Il doit correspondre EXACTEMENT à une de ces valeurs : 'Full-time', 'Part-time', 'Intern', 'Contractor'. (Mets 'Full-time' si c'est un CDI 35h, 'Part-time' si c'est un temps partiel).
 
-    ÉTAPE 2 : Utilise ces informations pour générer une commande SQL.
-    La table se nomme 'employes'.
-    Utilise 'INSERT OR REPLACE' pour gérer les mises à jour.
-    La clé unique est sur (nom, prenom).
-
-    Exemple de format :
-    INSERT OR REPLACE INTO employes (nom, prenom, temps_de_travail, type_de_contrat, salaire_horaire, disponibilite) 
-    VALUES ('Dupont', 'Jean', '35', 'CDI', 18.5, '2024-01-01');
+    ÉTAPE 2 : Utilise ces informations pour générer une commande SQL pour la table 'employees'.
+    La syntaxe pour mettre à jour ou insérer est :
+    INSERT INTO employees (first_name, last_name, weekly_hours_max, contract_type)
+    VALUES ('Jean', 'Dupont', 35, 'Full-time')
+    ON CONFLICT(first_name, last_name) DO UPDATE SET
+    weekly_hours_max=excluded.weekly_hours_max,
+    contract_type=excluded.contract_type;
 
     RÉPONSE : Ne retourne RIEN D'AUTRE que la commande SQL complète, en une seule ligne, terminée par un point-virgule.
 
@@ -87,15 +85,21 @@ def call_mistral_for_sql(texte_contrat):
 
     payload = {
         "messages": [{"role": "user", "content": prompt}],
-        "max_completion_tokens": 2048,
-        "temperature": 1
+        # J'ai mis 1024, c'est suffisant pour cette requête
+        "max_completion_tokens": 1024,
+        # On remet temperature à 1 si votre modèle l'exige
+        # "temperature": 1
     }
 
+    # Si votre modèle n'accepte pas temperature, supprimez la ligne du dessus
+    if "temperature" in payload and payload["temperature"] == 1:
+        # On suppose que 1 est la valeur par défaut et peut être omis
+        del payload["temperature"]
+
     # --- CHANGEMENT 2 : LES HEADERS ---
-    # Azure OpenAI utilise "api-key"
     headers = {
         'Content-Type': 'application/json',
-        'api-key': AZURE_OPENAI_KEY  # et non "Authorization: Bearer"
+        'api-key': AZURE_OPENAI_KEY
     }
 
     try:
@@ -110,12 +114,12 @@ def call_mistral_for_sql(texte_contrat):
         result = response.json()  # C'est ici que l'erreur se produisait
 
         # --- CHANGEMENT 3 : LIRE LA REPONSE ---
-        # La réponse est dans result['choices'][0]['message']['content']
         sql_command = result['choices'][0]['message']['content']
 
         # Nettoyer la réponse pour n'avoir que le SQL
         sql_command = sql_command.strip().replace("```sql", "").replace("```", "")
 
+        # On vérifie qu'elle commence bien par INSERT
         if not sql_command.startswith("INSERT"):
             print(f"Erreur: L'IA n'a pas retourné une commande SQL valide. Réponse: {sql_command}")
             return None
@@ -136,9 +140,8 @@ def call_mistral_for_sql(texte_contrat):
         print(f"Réponse reçue : {result}")
         return None
     except Exception as e:
-        print(f"Erreur inattendue lors de l'appel à l'API Mistral : {e}")
+        print(f"Erreur inattendue lors de l'appel à l'IA : {e}")
         return None
-
 
 def save_sql_to_file(sql_command):
     """Ajoute la commande SQL au fichier texte."""
