@@ -188,7 +188,7 @@ class ContractHandler(FileSystemEventHandler):
     def process_file(self, pdf_path):
         """Orchestre tout le processus pour un fichier."""
 
-        print(f"Traitement de {pdf_path}...")
+        print(f"Traitement de {pdf_path}...", flush=True)
         try:
             # 1. Lire le PDF
             texte_contrat = extract_text_from_pdf(pdf_path)
@@ -200,15 +200,15 @@ class ContractHandler(FileSystemEventHandler):
             if not sql_command:
                 return
 
-            print(f"SQL Généré : {sql_command}")
+            print(f"SQL Généré : {sql_command}", flush=True)
 
             # 3. Sauvegarder le SQL dans le fichier texte
             save_sql_to_file(sql_command)
 
             # 4. Exécuter la mise à jour BDD
-            print("Exécution automatique de la mise à jour BDD...")
+            print("Exécution automatique de la mise à jour BDD...", flush=True)
             update_database.main()
-            print("--- Cycle complet terminé ! ---")
+            print("--- Cycle complet terminé ! ---", flush=True)
 
             # --- AJOUT FINAL : DÉPLACER LE FICHIER ---
             # On déplace le fichier vers "Processed"
@@ -216,15 +216,15 @@ class ContractHandler(FileSystemEventHandler):
             nom_fichier = os.path.basename(pdf_path)
             destination = os.path.join("Contracts_Processed", nom_fichier)
             shutil.move(pdf_path, destination)
-            print(f"Fichier déplacé vers {destination}")
+            print(f"Fichier déplacé vers {destination}", flush=True)
             # --- FIN DE L'AJOUT ---
 
         except Exception as e:
             # Si le script plante, le fichier n'est PAS déplacé
             # et on peut le corriger et le remettre
-            print(f"ERREUR lors du traitement de {pdf_path} : {e}")
+            print(f"ERREUR lors du traitement de {pdf_path} : {e}", flush=True)
         finally:
-            print(f"\n--- En attente du prochain changement ---")
+            print(f"\n--- En attente du prochain changement ---", flush=True)
 
 
 # --- 4. SCRIPT PRINCIPAL ---
@@ -240,8 +240,8 @@ if __name__ == "__main__":
     observer = Observer()
     observer.schedule(event_handler, path, recursive=False)
 
-    print(f"Surveillance du dossier '{path}' démarrée.")
-    print(f"Les commandes SQL seront stockées dans '{OUTPUT_SQL_FILE}'.")
+    print(f"Surveillance du dossier '{path}' démarrée.", flush=True)
+    print(f"Les commandes SQL seront stockées dans '{OUTPUT_SQL_FILE}'.", flush=True)
     observer.start()
 
     try:
@@ -249,5 +249,5 @@ if __name__ == "__main__":
             time.sleep(5)
     except KeyboardInterrupt:
         observer.stop()
-        print("Surveillance arrêtée.")
+        print("Surveillance arrêtée.", flush=True)
     observer.join()
