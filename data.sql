@@ -10,19 +10,19 @@ INSERT INTO employees (
 -- Liste des skills
 
 INSERT INTO skills (name) VALUES
-    ('C Programming'),
-    ('Python'),
-    ('Soldering'),
+    ('Accueil'),
+    ('Conseiller'),
+    ('Directeur'),
     ('PCB Design'),
     ('Project Management');
 
 -- Liaison des employés aux skills
 
 INSERT INTO employee_skills (employee_id, skill_id) VALUES
-    (1, 5), -- Alice knows Project Management
+    (1, 1), -- Alice knows Project Management
     (2, 1), -- Bob knows C Programming
-    (2, 3), -- Bob knows Soldering
-    (2, 4), -- Bob knows PCB Design
+    (2, 2), -- Bob knows Soldering
+    (2, 3), -- Bob knows PCB Design
     (3, 1), -- Charlie knows C Programming
     (3, 2); -- Charlie knows Python
 

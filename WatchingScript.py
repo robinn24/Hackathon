@@ -16,7 +16,6 @@ NOM_DU_DEPLOYEMENT = "gpt-5-mini"
 RESSOURCE_URL_BASE = "https://hachaton.cognitiveservices.azure.com"
 
 # La clé API (c'est la clé de votre ressource Azure OpenAI)
-AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY_SECRET")
 
 # L'API version (gardez celle de votre erreur)
 API_VERSION = "2025-04-01-preview"
