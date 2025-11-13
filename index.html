@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Accès Planning — RH / Employé</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="force-dark">
+  <div class="wrap">
+    <div class="card" id="screen-home">
+      <h1>Accès au planning</h1>
+      <p class="lead">Demo locale — Données simulées</p>
+
+      <div class="choices">
+        <button class="btn" id="btn-rh">Je suis RH</button>
+        <button class="btn secondary" id="btn-emp">Je suis un·e employé·e</button>
+      </div>
+
+      <div id="form-rh" class="panel hidden fade-in">
+        <div class="input-row">
+          <input type="password" id="rh-code" placeholder="Code RH (Essaye: RH2025)" />
+          <button class="btn" id="rh-validate">Valider</button>
+        </div>
+        <p class="small">Le code par défaut est <strong>RH2025</strong>.</p>
+      </div>
+
+      <div id="form-emp" class="panel hidden fade-in">
+        <div class="input-row">
+          <input type="text" id="emp-name" placeholder="Prénom (ex. Alice)" autocomplete="name" />
+          <button class="btn" id="emp-open">Entrer</button>
+        </div>
+        <p class="small">Essaye avec : <strong>Alice</strong>, <strong>Bob</strong> ou <strong>Charlie</strong>.</p>
+      </div>
+    </div>
+
+    <div class="card hidden" id="screen-rh">
+      <div class="topbar">
+        <h1>Tableau de bord RH</h1>
+        <div>
+          <button class="btn secondary" id="btn-rh-back">Déconnexion</button>
+        </div>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <strong>Rechercher un·e employé·e</strong>
+          <div class="input-row" style="margin-top:8px">
+            <input type="text" id="rh-search-name" placeholder="Prénom (ex: Alice)" />
+            <button class="btn" id="rh-search">Voir planning</button>
+          </div>
+          <p class="small">Appuie sur Entrée pour valider.</p>
+        </div>
+
+        <div class="panel">
+          <strong>Actions</strong>
+          <div class="choices" style="margin-top:8px">
+            <button class="btn secondary" id="dl-csv">Télécharger CSV</button>
+          </div>
+          <p class="small">Exporte les données actuelles.</p>
+        </div>
+      </div>
+
+      <div id="rh-result" class="panel hidden" style="margin-top:14px">
+        <h2 style="margin:0 0 10px 0">Planning de <span id="rh-emp-label" style="color:var(--accent)"></span></h2>
+        <table id="rh-table">
+          <thead>
+            <tr><th>Jour</th><th>Plage horaire</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card hidden" id="screen-emp">
+      <div class="topbar">
+        <h1>Mon planning</h1>
+        <button class="btn secondary" id="emp-back">Quitter</button>
+      </div>
+
+      <div class="grid">
+        <div class="panel">
+          <div><strong>Prénom :</strong> <span id="emp-firstname"></span></div>
+          <div><strong>Poste :</strong> <span id="emp-role"></span></div>
+        </div>
+      </div>
+
+      <h2 style="margin-top:14px">Semaine en cours</h2>
+      <table id="emp-table">
+        <thead>
+          <tr><th>Jour</th><th>Plage horaire</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <button id="chat-toggle" class="fab-chat hidden" title="Ouvrir le chat">💬</button>
+
+  <div id="chat-widget" class="chat chat-closed">
+    <div class="chat-header">
+      <div>
+        <strong id="chat-title">Assistant</strong>
+        <div class="small" id="chat-subtitle">Support planning</div>
+      </div>
+      <button id="chat-close" class="link-like">✕</button>
+    </div>
+
+    <div id="chat-body" class="chat-body"></div>
+
+    <form id="chat-form" class="chat-input" autocomplete="off">
+      <input id="chat-text" type="text" placeholder="Écrire un message…" />
+      <button class="btn" type="submit">Envoyer</button>
+    </form>
+  </div>
+
+  <script>
+    (async function () {
+      // =========================================
+      // 1. CONFIGURATION
+      // =========================================
+      const API_URL = "http://localhost:5000/api/planning";
+      const RH_CODE = "RH2025";
+      const DAYS_ORDER = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
+      
+      // Map pour traduire Anglais (DB) -> Français (Site)
+      const DAYS_MAP = {
+        'Mon': 'Lun', 'Tue': 'Mar', 'Wed': 'Mer', 'Thu': 'Jeu', 
+        'Fri': 'Ven', 'Sat': 'Sam', 'Sun': 'Dim'
+      };
+
+      let employeesData = [];
+      const index = {};
+      const norm = (v) => (v || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+
+      // =========================================
+      // 2. CHARGEMENT DES DONNÉES (LE VRAI "HARD STUFF")
+      // =========================================
+      try {
+        // On appelle ton serveur Python
+        const response = await fetch(API_URL);
+        if (!response.ok) throw new Error("Erreur connexion serveur");
+        
+        const rawData = await response.json();
+        
+        // On doit transformer la liste plate (SQL) en objets structurés (JS)
+        // SQL renvoie : [{nom: Zig, jour: Mon}, {nom: Zig, jour: Tue}...]
+        // On veut : { Zig: { week: { Lun: "...", Mar: "..." } } }
+        
+        const tempMap = {};
+
+        rawData.forEach(row => {
+            const fullName = row.first_name; // On utilise juste le prénom pour simplifier l'affichage
+            
+            if (!tempMap[fullName]) {
+                tempMap[fullName] = {
+                    name: fullName,
+                    role: row.role || "Employé",
+                    week: {}
+                };
+            }
+            
+            // Traduction du jour et formatage de l'heure
+            const dayFr = DAYS_MAP[row.day] || row.day;
+            // On coupe les secondes (09:00:00 -> 09:00)
+            const start = row.start ? row.start.substring(0, 5) : "";
+            const end = row.end ? row.end.substring(0, 5) : "";
+            
+            tempMap[fullName].week[dayFr] = `${start}–${end}`;
+        });
+
+        // Convertir la map en tableau pour le site
+        employeesData = Object.values(tempMap);
+
+        // Créer l'index pour la recherche
+        employeesData.forEach(e => {
+            index[norm(e.name)] = e;
+        });
+
+        console.log("✅ Données chargées depuis la DB :", employeesData);
+
+      } catch (error) {
+        console.error("Erreur API:", error);
+        alert("Impossible de connecter au serveur (server.py). Vérifie qu'il est lancé !");
+        // Données de secours vides pour ne pas faire planter l'interface
+        employeesData = [];
+      }
+
+      // =========================================
+      // 3. UTILITAIRES UI & NAVIGATION (Reste inchangé)
+      // =========================================
+      const $ = (sel) => document.querySelector(sel);
+      const show = (id) => document.getElementById(id).classList.remove("hidden");
+      const hide = (id) => document.getElementById(id).classList.add("hidden");
+
+      function fillTable(tbody, week) {
+        tbody.innerHTML = "";
+        DAYS_ORDER.forEach((d) => {
+          const tr = document.createElement("tr");
+          const td1 = document.createElement("td");
+          const td2 = document.createElement("td");
+          td1.textContent = d;
+          td2.textContent = week[d] || "—"; // Tiret si pas d'horaire
+          if(!week[d]) td2.style.color = "var(--muted)";
+          tr.append(td1, td2);
+          tbody.appendChild(tr);
+        });
+      }
+
+      $("#btn-rh").onclick = () => { show("form-rh"); hide("form-emp"); $("#rh-code").focus(); };
+      $("#btn-emp").onclick = () => { show("form-emp"); hide("form-rh"); $("#emp-name").focus(); };
+
+      // --- LOGIN RH ---
+      let currentRole = null;
+      function loginRH() {
+        if ($("#rh-code").value.trim() === RH_CODE) {
+          $("#rh-code").value = "";
+          hide("screen-home"); show("screen-rh");
+          currentRole = "rh"; updateChatRole(); show("chat-toggle");
+        } else { alert("Code incorrect (RH2025)"); }
+      }
+      $("#rh-validate").onclick = loginRH;
+      $("#rh-code").addEventListener("keyup", (e) => { if (e.key === "Enter") loginRH(); });
+
+      // --- ACTIONS RH ---
+      $("#btn-rh-back").onclick = () => {
+        hide("screen-rh"); show("screen-home"); currentRole = null; hide("chat-toggle"); hide("rh-result"); $("#rh-search-name").value="";
+      };
+      
+      function searchEmployee() {
+        const query = $("#rh-search-name").value;
+        const emp = index[norm(query)];
+        const tbody = document.querySelector("#rh-table tbody");
+        if (emp) {
+          $("#rh-emp-label").textContent = emp.name + " (" + emp.role + ")";
+          fillTable(tbody, emp.week); show("rh-result");
+        } else { alert("Employé introuvable dans la base de données."); }
+      }
+      $("#rh-search").onclick = searchEmployee;
+      $("#rh-search-name").addEventListener("keyup", (e) => { if (e.key === "Enter") searchEmployee(); });
+
+      $("#dl-csv").onclick = () => {
+        const header = ["Prenom", "Poste", ...DAYS_ORDER].join(",");
+        const rows = employeesData.map(e => [e.name, e.role, ...DAYS_ORDER.map(d => e.week[d] || "")].join(","));
+        const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = "planning_db.csv"; a.click();
+      };
+
+      // --- LOGIN EMP ---
+      let currentEmployee = null;
+      function loginEmp() {
+        const name = $("#emp-name").value;
+        const emp = index[norm(name)];
+        if (!emp) { alert("Prénom introuvable. Es-tu sûr qu'il est dans la base de données ?"); return; }
+        currentEmployee = emp;
+        $("#emp-firstname").textContent = emp.name;
+        $("#emp-role").textContent = emp.role;
+        fillTable(document.querySelector("#emp-table tbody"), emp.week);
+        $("#emp-name").value = ""; hide("screen-home"); show("screen-emp");
+        currentRole = "emp"; updateChatRole(); show("chat-toggle");
+      }
+      $("#emp-open").onclick = loginEmp;
+      $("#emp-name").addEventListener("keyup", (e) => { if (e.key === "Enter") loginEmp(); });
+      $("#emp-back").onclick = () => { hide("screen-emp"); show("screen-home"); currentRole = null; hide("chat-toggle"); };
+
+      // --- CHAT ---
+      const chatBox = $("#chat-widget");
+      const chatBtn = $("#chat-toggle");
+      const chatBody = $("#chat-body");
+      const chatInput = $("#chat-text");
+      chatBtn.onclick = () => { chatBox.classList.toggle("chat-closed"); if(!chatBox.classList.contains("chat-closed")) { chatInput.focus(); maybeGreet(); }};
+      $("#chat-close").onclick = () => chatBox.classList.add("chat-closed");
+
+      function updateChatRole() {
+        chatBody.innerHTML = "";
+        $("#chat-title").textContent = currentRole === "emp" ? "Assistant RH" : "Assistant Admin";
+        $("#chat-subtitle").textContent = currentRole === "emp" ? "Déclare une absence" : "Gestion";
+      }
+      function maybeGreet() {
+        if (chatBody.children.length === 0) addMsg("bot", currentRole==='emp' ? `Bonjour ${currentEmployee.name} !` : "Bonjour !");
+      }
+      function addMsg(who, text) {
+        const d = document.createElement("div"); d.className = "msg " + (who==="user"?"from-user":"from-bot");
+        d.innerHTML = `<div class="bubble">${text}</div>`; chatBody.appendChild(d); chatBody.scrollTop = chatBody.scrollHeight;
+      }
+      $("#chat-form").addEventListener("submit", (e) => {
+        e.preventDefault(); const t = chatInput.value.trim(); if(!t) return;
+        addMsg("user", t); chatInput.value = "";
+        setTimeout(() => addMsg("bot", "Ceci est une démo connectée à la DB. Le chat n'est pas encore relié à l'IA."), 600);
+      });
+
+    })();
+  </script>
+</body>
+</html>

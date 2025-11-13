@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS planning (
     date TEXT NOT NULL,
     start_time TEXT NOT NULL,
     end_time TEXT NOT NULL,
+    pause TEXT NOT NULL,
     validated_by_rh BOOLEAN DEFAULT 0,
     last_update TEXT DEFAULT (datetime('now')),
     FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,

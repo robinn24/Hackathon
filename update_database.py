@@ -55,6 +55,11 @@ def apply_sql_commands(conn):
         conn.commit()
         print(f"Succès ! Les commandes de {COMMANDS_FILE} ont été appliquées à {DB_FILE}.")
 
+        print(f"Vidage du fichier {COMMANDS_FILE}...")
+        with open(COMMANDS_FILE, 'w', encoding='utf-8') as f:
+            f.write("")
+        print("Fichier de commandes vidé.")
+
     except FileNotFoundError:
         print(f"ERREUR: Fichier de commandes '{COMMANDS_FILE}' non trouvé.")
     except sqlite3.Error as e:

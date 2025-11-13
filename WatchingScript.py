@@ -2,9 +2,12 @@ import time
 import os
 import json
 import requests
+import shutil
 import pdfplumber  # Pour lire les PDF
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler
+
+import update_database
 
 # --- 1. CONFIGURATION ---
 # (Remplissez ces valeurs)
@@ -58,30 +61,42 @@ def call_mistral_for_sql(texte_contrat):
 
     # Ce prompt est la clé. Il demande à l'IA d'extraire ET de formater en SQL.
     prompt = f"""
-    Tu es un assistant RH expert en SQL (SQLite). Analyse le contrat de travail suivant.
+        Tu es un assistant RH expert en SQL (SQLite). Analyse le contrat de travail suivant.
 
-    ÉTAPE 1 : Extrais les informations suivantes en te basant sur le contrat :
-    - first_name: Le prénom de l'employé.
-    - last_name: Le nom de famille de l'employé.
-    - weekly_hours_max: Le temps de travail hebdomadaire (juste le nombre, ex: 35).
-    - contract_type: Le type de contrat. Il doit correspondre EXACTEMENT à une de ces valeurs : 'Full-time', 'Part-time', 'Intern', 'Contractor'. (Mets 'Full-time' si c'est un CDI 35h, 'Part-time' si c'est un temps partiel).
+        ÉTAPE 1 : Extrais les informations suivantes :
+        - first_name: Le **Prénom** de l'employé (ex: Charles, Jean-Pierre).
+        - last_name: Le **Nom de famille** de l'employé (ex: Dupont, Martin).
+        - weekly_hours_max: Le temps de travail hebdomadaire (juste le nombre, ex: 35).
+        - contract_type: Le type de contrat ('Full-time', 'Part-time', 'Intern', 'Contractor').
 
-    ÉTAPE 2 : Utilise ces informations pour générer une commande SQL pour la table 'employees'.
-    La syntaxe pour mettre à jour ou insérer est :
-    INSERT INTO employees (first_name, last_name, weekly_hours_max, contract_type)
-    VALUES ('Jean', 'Dupont', 35, 'Full-time')
-    ON CONFLICT(first_name, last_name) DO UPDATE SET
-    weekly_hours_max=excluded.weekly_hours_max,
-    contract_type=excluded.contract_type;
+        **REGLES CRITIQUES DE FORMATAGE :**
+        1.  **NE JAMAIS INVERSER LE PRÉNOM ET LE NOM.**
+            Si le contrat dit 'Charles Dupont' :
+            first_name='Charles'
+            last_name='Dupont'
+            Si le contrat dit 'DUPONT, Charles' :
+            first_name='Charles'
+            last_name='Dupont'
+        2.  **NORMALISER LA CASSE.**
+            Le premier caractère doit être en majuscule, le reste en minuscules.
+            Exemple : 'DUPONT' -> 'Dupont'. 'jean' -> 'Jean'. 'jean-pierre' -> 'Jean-pierre'.
 
-    RÉPONSE : Ne retourne RIEN D'AUTRE que la commande SQL complète, en une seule ligne, terminée par un point-virgule.
+        ÉTAPE 2 : Utilise ces informations pour générer une commande SQL pour la table 'employees'.
+        La syntaxe pour mettre à jour ou insérer est :
+        INSERT INTO employees (first_name, last_name, weekly_hours_max, contract_type)
+        VALUES ('Jean', 'Dupont', 35, 'Full-time')
+        ON CONFLICT(first_name, last_name) DO UPDATE SET
+        weekly_hours_max=excluded.weekly_hours_max,
+        contract_type=excluded.contract_type;
 
-    --- DEBUT CONTRAT ---
-    {texte_contrat}
-    --- FIN CONTRAT ---
+        RÉPONSE : Ne retourne RIEN D'AUTRE que la commande SQL complète, en une seule ligne, terminée par un point-virgule.
 
-    Commande SQL:
-    """
+        --- DEBUT CONTRAT ---
+        {texte_contrat}
+        --- FIN CONTRAT ---
+
+        Commande SQL:
+        """
 
     payload = {
         "messages": [{"role": "user", "content": prompt}],
@@ -172,27 +187,10 @@ class ContractHandler(FileSystemEventHandler):
 
     def process_file(self, pdf_path):
         """Orchestre tout le processus pour un fichier."""
-        # On ajoute un "verrou" pour être 100% sûr
-        # de ne pas traiter le même fichier deux fois en 2 secondes
 
-        # On crée un dictionnaire pour stocker les temps de traitement
-        if not hasattr(self, 'last_processed_time'):
-            self.last_processed_time = {}
-
-        current_time = time.time()
-        last_time = self.last_processed_time.get(pdf_path, 0)
-
-        # Si le fichier a été traité il y a moins de 5 secondes, on ignore
-        if current_time - last_time < 5.0:
-            print(f"Ignoré (traité récemment) : {pdf_path}")
-            return
-
-        # On enregistre le moment où on commence ce traitement
-        self.last_processed_time[pdf_path] = current_time
-
+        print(f"Traitement de {pdf_path}...")
         try:
             # 1. Lire le PDF
-            # (Note: le time.sleep(1) est déjà dans votre fonction extract_text_from_pdf)
             texte_contrat = extract_text_from_pdf(pdf_path)
             if not texte_contrat:
                 return
@@ -207,8 +205,24 @@ class ContractHandler(FileSystemEventHandler):
             # 3. Sauvegarder le SQL dans le fichier texte
             save_sql_to_file(sql_command)
 
+            # 4. Exécuter la mise à jour BDD
+            print("Exécution automatique de la mise à jour BDD...")
+            update_database.main()
+            print("--- Cycle complet terminé ! ---")
+
+            # --- AJOUT FINAL : DÉPLACER LE FICHIER ---
+            # On déplace le fichier vers "Processed"
+            # pour ne plus jamais le détecter
+            nom_fichier = os.path.basename(pdf_path)
+            destination = os.path.join("Contracts_Processed", nom_fichier)
+            shutil.move(pdf_path, destination)
+            print(f"Fichier déplacé vers {destination}")
+            # --- FIN DE L'AJOUT ---
+
         except Exception as e:
-            print(f"Erreur lors du traitement du fichier {pdf_path} : {e}")
+            # Si le script plante, le fichier n'est PAS déplacé
+            # et on peut le corriger et le remettre
+            print(f"ERREUR lors du traitement de {pdf_path} : {e}")
         finally:
             print(f"\n--- En attente du prochain changement ---")
 
@@ -218,7 +232,8 @@ class ContractHandler(FileSystemEventHandler):
 if __name__ == "__main__":
     # 1. Installer les dépendances :
     # pip install watchdog requests pdfplumber
-
+    PROCESSED_DIR = "Contracts_Processed"
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
     # 2. Lancer le gardien
     path = DOSSIER_CONTRATS
     event_handler = ContractHandler()
