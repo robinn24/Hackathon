@@ -11,8 +11,7 @@ INSERT INTO employees (
   ('Eve',     'Martin',  'Part-time', 20, 1, 1,    'PM backup');
 
 -- ============================
--- Compétences (IDs fixes)
--- 1:C Programming, 2:Python, 3:Soldering, 4:PCB Design, 5:Project Management
+-- Compétences
 -- ============================
 INSERT INTO skills (name) VALUES
   ('C Programming'),
@@ -33,41 +32,52 @@ INSERT INTO employee_skills (employee_id, skill_id) VALUES (2, 4);
 -- Charlie
 INSERT INTO employee_skills (employee_id, skill_id) VALUES (3, 1);
 INSERT INTO employee_skills (employee_id, skill_id) VALUES (3, 2);
--- Diana (PCB + Soldering)
+-- Diana
 INSERT INTO employee_skills (employee_id, skill_id) VALUES (4, 3);
 INSERT INTO employee_skills (employee_id, skill_id) VALUES (4, 4);
--- Eve (Project Management)
+-- Eve
 INSERT INTO employee_skills (employee_id, skill_id) VALUES (5, 5);
 
 -- ============================
--- Disponibilités
+-- Disponibilités (corrigées et complétées)
 -- ============================
--- Alice : Lun/Mar 09:00-17:00
-INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
-  (1, 'Mon', '09:00', '17:00'),
-  (1, 'Tue', '09:00', '17:00');
 
--- Bob : Lun/Mer 09:00-13:00
+-- Alice – Full-time : 40h → 5 × 8h
 INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
-  (2, 'Mon', '09:00', '13:00'),
-  (2, 'Wed', '09:00', '13:00');
+  (1, 'Mon', '08:00', '16:00'),
+  (1, 'Tue', '08:00', '16:00'),
+  (1, 'Wed', '08:00', '16:00'),
+  (1, 'Thu', '08:00', '16:00'),
+  (1, 'Fri', '08:00', '16:00');
 
--- Charlie : Mar/Jeu 10:00-16:00
+-- Bob – Part-time : 20h → 4 × 5h
 INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
-  (3, 'Tue', '10:00', '16:00'),
-  (3, 'Thu', '10:00', '16:00');
+  (2, 'Mon', '08:00', '13:00'),
+  (2, 'Tue', '08:00', '13:00'),
+  (2, 'Wed', '08:00', '13:00'),
+  (2, 'Thu', '08:00', '13:00');
 
--- Diana : Jeu/Ven 09:00-17:00
+-- Charlie – Intern : 15h → 3 × 5h
 INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
-  (4, 'Thu', '09:00', '17:00'),
-  (4, 'Fri', '09:00', '17:00');
+  (3, 'Tue', '11:00', '16:00'),
+  (3, 'Thu', '11:00', '16:00'),
+  (3, 'Fri', '11:00', '16:00');
 
--- Eve : Sam 10:00-16:00
+-- Diana – Contractor : 30h → 4 × 7h30
 INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
+  (4, 'Tue', '08:00', '15:30'),
+  (4, 'Wed', '08:00', '15:30'),
+  (4, 'Thu', '08:00', '15:30'),
+  (4, 'Fri', '08:00', '15:30');
+
+-- Eve – Part-time : 20h → 6h + 7h + 7h
+INSERT INTO employee_availability (employee_id, day_of_week, start_time, end_time) VALUES
+  (5, 'Thu', '09:00', '16:00'),
+  (5, 'Fri', '09:00', '16:00'),
   (5, 'Sat', '10:00', '16:00');
 
 -- ============================
--- Tâches (délais compatibles)
+-- Tâches
 -- ============================
 INSERT INTO tasks (
   title, description, duration_hours, deadline, priority, assigned_to, status, location, cost_estimate
@@ -79,19 +89,24 @@ INSERT INTO tasks (
 -- ============================
 -- Compétences requises par tâche
 -- ============================
+
 -- Task 1 : PCB Design + Soldering
 INSERT INTO task_required_skills (task_id, skill_id) VALUES (1, 4);
 INSERT INTO task_required_skills (task_id, skill_id) VALUES (1, 3);
+
 -- Task 2 : C Programming + Python
 INSERT INTO task_required_skills (task_id, skill_id) VALUES (2, 1);
 INSERT INTO task_required_skills (task_id, skill_id) VALUES (2, 2);
+
 -- Task 3 : Project Management
 INSERT INTO task_required_skills (task_id, skill_id) VALUES (3, 5);
 
 -- ============================
--- Planning : (VIDE)
+-- Planning (vide)
 -- ============================
+-- Intentionnellement vide
 
 -- ============================
--- Absences : (VIDE)
+-- Absences (vide)
 -- ============================
+-- Intentionnellement vide
