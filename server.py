@@ -9,22 +9,42 @@ import json
 import requests
 import pdfplumber
 import shutil
-from datetime import datetime, date, timedelta  # Ajout
-import traceback  # Ajout
-from dotenv import load_dotenv
+from datetime import datetime, date, timedelta
+import traceback
+from dotenv import load_dotenv  # Importé
 import os
 
-# Charger le fichier .env
-load_dotenv()
+# --- MODIFICATION ICI ---
+# Charger le fichier .env en mode "verbose" pour voir ce qu'il fait
+print("Chargement du fichier .env...")
+if load_dotenv(verbose=True):
+    print("Fichier .env chargé avec succès.")
+else:
+    print("AVERTISSEMENT: Fichier .env non trouvé. Utilisation des variables d'environnement système.")
+
+# Vérification stricte des clés
+AZURE_OPENAI_KEY_SECRET = os.getenv("AZURE_OPENAI_KEY_SECRET")
 AZURE_KEY_CHATBOT = os.getenv("AZURE_KEY_CHATBOT")
 AZURE_ENDPOINT_CHATBOT = os.getenv("AZURE_ENDPOINT_CHATBOT")
-AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY_SECRET")
 
+# On utilise AZURE_OPENAI_KEY_SECRET pour l'extracteur PDF
+AZURE_OPENAI_KEY = AZURE_OPENAI_KEY_SECRET
+
+# Vérification au démarrage
 if not AZURE_OPENAI_KEY:
-    print("ERREUR CRITIQUE: AZURE_OPENAI_KEY_SECRET n'est pas définie.")
+    print("ERREUR CRITIQUE: AZURE_OPENAI_KEY_SECRET n'est pas définie dans .env !")
     exit()
-else:
-    print("Clé Azure chargée avec succès :", AZURE_OPENAI_KEY[:8], "...")  # Masque la clé
+if not AZURE_KEY_CHATBOT:
+    print("ERREUR CRITIQUE: AZURE_KEY_CHATBOT n'est pas définie dans .env !")
+    exit()
+if not AZURE_ENDPOINT_CHATBOT:
+    print("ERREUR CRITIQUE: AZURE_ENDPOINT_CHATBOT n'est pas définie dans .env !")
+    exit()
+
+print("Toutes les clés API ont été chargées avec succès.")
+# --- FIN DE LA MODIFICATION ---
+
+
 # --- AJOUT: Importer le cerveau du Planificateur ---
 try:
     from Planificateur import (
@@ -47,6 +67,7 @@ CORS(app)
 
 DB_FILE = "hackaton.db"
 SCHEMA_FILE = "main.sql"
+DATA_FILE = "data.sql"
 UPLOAD_FOLDER = 'Contracts'
 PROCESSED_DIR = "Contracts_Processed"
 app.config['UPLOAD_FOLDER'] = os.path.abspath(UPLOAD_FOLDER)
@@ -54,7 +75,7 @@ app.config['UPLOAD_FOLDER'] = os.path.abspath(UPLOAD_FOLDER)
 # Config de l'IA (directement ici)
 NOM_DU_DEPLOYEMENT = "gpt-5-mini"  # (Vérifie si c'est toujours le bon nom)
 RESSOURCE_URL_BASE = "https://hachaton.cognitiveservices.azure.com"
-AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY_SECRET")
+# AZURE_OPENAI_KEY = os.environ.get("AZURE_OPENAI_KEY_SECRET") <-- Déplacé en haut
 API_VERSION = "2025-04-01-preview"
 AZURE_OPENAI_ENDPOINT_URL = f"{RESSOURCE_URL_BASE}/openai/deployments/{NOM_DU_DEPLOYEMENT}/chat/completions?api-version={API_VERSION}"
 OUTPUT_SQL_FILE = "Watcher_SQL_Updates.txt"  # Le fichier d'archive SQL
@@ -276,6 +297,85 @@ def get_planning():
         if conn: conn.close()
 
 
+@app.route('/api/pending-absences', methods=['GET'])
+def get_pending_absences():
+    """
+    Renvoie la liste de TOUTES les absences en attente pour la RH.
+    """
+    conn = get_db_connection()
+    # On JOIN avec employees pour afficher le nom
+    query = """
+    SELECT 
+        a.id, 
+        a.start_date, 
+        a.end_date, 
+        a.reason,
+        e.first_name,
+        e.last_name
+    FROM absences a
+    JOIN employees e ON a.employee_id = e.id
+    WHERE a.status = 'Pending'
+    ORDER BY a.start_date;
+    """
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query)
+        rows = cursor.fetchall()
+
+        absences = []
+        for row in rows:
+            absences.append({
+                "id": row["id"],
+                "start_date": row["start_date"],
+                "end_date": row["end_date"],
+                "reason": row["reason"],
+                "employee_name": f"{row['first_name']} {row['last_name']}"
+            })
+
+        return jsonify(absences)  # Renvoie la liste
+
+    except Exception as e:
+        print(f"ERREUR dans /api/pending-absences: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
+
+# --- NOUVELLE ROUTE : APPROUVER/REJETER UNE DEMANDE ---
+@app.route('/api/review-absence', methods=['POST'])
+def review_absence():
+    """
+    Met à jour le statut d'une demande d'absence (Approuvé ou Rejeté).
+    """
+    data = request.json
+    absence_id = data.get('absence_id')
+    new_status = data.get('new_status')  # Doit être "Approved" ou "Rejected"
+
+    if not absence_id or new_status not in ['Approved', 'Rejected']:
+        return jsonify({"error": "Données invalides"}), 400
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE absences SET status = ? WHERE id = ?",
+            (new_status, absence_id)
+        )
+        conn.commit()
+
+        if cursor.rowcount == 0:
+            return jsonify({"error": "Demande non trouvée"}), 404
+
+        return jsonify({"message": f"Demande {absence_id} marquée comme {new_status}"})
+
+    except Exception as e:
+        print(f"ERREUR dans /api/review-absence: {e}")
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        if conn: conn.close()
+
 # --- MODIFICATION: Logique du planificateur ajoutée ici ---
 @app.route('/api/upload-contract', methods=['POST'])
 def upload_contract():
@@ -393,6 +493,7 @@ def get_my_schedule():
     finally:
         if conn: conn.close()
 
+
 # --- NOUVELLE ROUTE: Pour l'approbation ---
 @app.route('/api/approve-plan', methods=['POST'])
 def approve_plan():
@@ -424,31 +525,70 @@ def approve_plan():
 # --- 4. POINT DE DÉMARRAGE ---
 from flask import send_from_directory
 
+
 # --- ROUTE POUR LA PAGE D'ACCUEIL ---
 @app.route("/")
 def home():
     return send_from_directory(".", "index.html")  # Sert index.html depuis le dossier racine
 
+
 # --- ROUTE POUR LES FICHIERS STATIQUES (CSS, JS, etc.) ---
 @app.route("/<path:path>")
 def static_files(path):
-    return send_from_directory(".", path)  # Sert styles.css, images, etc.
+    # Sécurité : ne servir que les fichiers attendus
+    allowed_files = ["styles.css", "main.sql", "data.sql"]  # Ajoute d'autres fichiers si nécessaire
+    if path in allowed_files:
+        return send_from_directory(".", path)
+    else:
+        # On ne veut pas que les gens puissent taper /server.py ou /.env
+        return "Fichier non autorisé", 404
+
 
 @app.route('/api/chat', methods=['POST'])
 def chat_with_ai():
     """
-    Reçoit un message du RH, appelle Azure OpenAI, et renvoie la réponse.
+    Reçoit un message d'un employé, appelle l'IA pour extraire une demande d'absence,
+    et l'enregistre dans la base de données.
     """
     try:
         user_message = request.json.get("message")
-        if not user_message:
-            return jsonify({"error": "Message manquant"}), 400
+        employee_name = request.json.get("employee_name")  # On a besoin de savoir QUI parle
 
-        # Prompt pour guider l'IA
-        system_prompt = """
-        Tu es un assistant RH connecté à une base SQLite.
-        - Si l'utilisateur demande une modification (ajout de skill, absence), propose la requête SQL mais ne l'exécute pas sans confirmation.
-        - Réponds de manière claire et concise.
+        if not user_message or not employee_name:
+            return jsonify({"error": "Message ou nom d'employé manquant"}), 400
+
+        # --- Étape 1: Trouver l'ID de l'employé ---
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id FROM employees WHERE first_name = ?", (employee_name,))
+        emp = cursor.fetchone()
+
+        if not emp:
+            conn.close()
+            return jsonify({"error": "Employé non trouvé"}), 404
+
+        employee_id = emp['id']
+
+        # --- Étape 2: Demander à l'IA d'extraire les infos ---
+        today_str = date.today().strftime('%Y-%m-%d')
+
+        system_prompt = f"""
+        Tu es un assistant RH. Ta seule tâche est d'extraire les demandes d'absence (maladie ou congé) du message de l'utilisateur.
+        Aujourd'hui, nous sommes le {today_str}.
+        - "demain" signifie un jour après aujourd'hui.
+        - "la semaine prochaine" commence le prochain Lundi.
+        - "lundi prochain" est le prochain Lundi.
+
+        Réponds **UNIQUEMENT** avec un objet JSON. 
+        Format attendu :
+        {{
+          "start_date": "YYYY-MM-DD",
+          "end_date": "YYYY-MM-DD",
+          "reason": "maladie" ou "congé"
+        }}
+
+        Si tu ne comprends pas la demande ou si ce n'est pas une demande d'absence, réponds :
+        {{ "error": "demande non comprise" }}
         """
 
         payload = {
@@ -456,36 +596,85 @@ def chat_with_ai():
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            "max_completion_tokens": 1024
+            "max_completion_tokens": 2048
         }
 
         headers = {
             "Content-Type": "application/json",
-            "api-key": AZURE_KEY_CHATBOT
+            "api-key": AZURE_KEY_CHATBOT  # On utilise la clé du chatbot
         }
 
         response = requests.post(AZURE_ENDPOINT_CHATBOT, data=json.dumps(payload), headers=headers)
         response.raise_for_status()
         result = response.json()
 
-        ai_reply = result['choices'][0]['message']['content'].strip()
-        return jsonify({"reply": ai_reply})
+        ai_reply_str = result['choices'][0]['message']['content'].strip()
+        ai_data = json.loads(ai_reply_str)
+
+        # --- Étape 3: Traiter la réponse de l'IA ---
+        if "error" in ai_data:
+            # L'IA n'a pas compris, on renvoie une réponse polie
+            return jsonify({
+                               "reply": "Désolé, je n'ai pas compris. Tu peux reformuler ta demande d'absence (ex: 'je suis malade demain') ?"})
+
+        # C'EST UN SUCCÈS ! On a les données
+        start_date = ai_data['start_date']
+        end_date = ai_data['end_date']
+        reason = ai_data['reason']
+
+        # --- Étape 4: Écrire dans la base de données ---
+        sql_insert = """
+        INSERT INTO absences (employee_id, start_date, end_date, reason, status)
+        VALUES (?, ?, ?, ?, 'Pending')
+        """
+        cursor.execute(sql_insert, (employee_id, start_date, end_date, reason))
+        conn.commit()
+        conn.close()
+
+        # --- Étape 5: Confirmer à l'utilisateur ---
+        reply_message = f"Bien noté ! Ta demande d'absence ({reason}) du {start_date} au {end_date} est enregistrée et en attente de validation."
+        return jsonify({"reply": reply_message})
 
     except Exception as e:
-        print(f"Erreur dans /api/chat: {e}")
+        print(f"ERREUR grave dans /api/chat: {e}")
+        traceback.print_exc()
+        if 'conn' in locals() and conn:
+            conn.close()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    if not AZURE_OPENAI_KEY:
-        print("ERREUR CRITIQUE: 'AZURE_OPENAI_KEY_SECRET' n'est pas définie.")
-        print("Vérifie ton fichier .env. Le serveur ne peut pas démarrer.")
-    else:
-        print("Clé API Azure trouvée.")
-        print("--- 1. Initialisation de la base de données ---")
-        create_tables()
-        os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-        os.makedirs(PROCESSED_DIR, exist_ok=True)
-        print(f"--- 2. Serveur API lancé (uploads vers '{app.config['UPLOAD_FOLDER']}') ---")
+    # Les vérifications de clés sont maintenant en haut du script
+    print("--- 1. Initialisation de la base de données ---")
 
-        # On lance SANS debug pour éviter le redémarrage qui cause l'erreur de connexion
-        app.run(debug=False, port=5000)
+    # On vérifie si la BDD existe AVANT de créer les tables
+    db_exists = os.path.exists(DB_FILE)
+
+    # Crée les tables (sécurisé avec "IF NOT EXISTS")
+    create_tables()
+
+    # --- CORRECTION DU REMPLISSAGE ---
+    # On ne remplit la BDD que si elle n'existait pas
+    if not db_exists:
+        print(f"Base de données '{DB_FILE}' non trouvée. Remplissage avec les données de '{DATA_FILE}'...")
+        try:
+            # On lit le CONTENU du fichier
+            with open(DATA_FILE, 'r', encoding='utf-8') as f:
+                sql_seed_script = f.read()
+
+            # On appelle apply_sql_script avec le CONTENU, pas le nom
+            apply_sql_script(sql_seed_script, archive=True)
+            print("Base de données remplie avec les données initiales.")
+        except FileNotFoundError:
+            print(f"AVERTISSEMENT: '{DATA_FILE}' non trouvé. Démarrage avec une base de données vide.")
+        except Exception as e:
+            print(f"ERREUR lors du remplissage de la BDD avec data.sql: {e}")
+    else:
+        print(f"Base de données '{DB_FILE}' existante trouvée. Pas de remplissage.")
+    # --- FIN DE LA CORRECTION ---
+
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    os.makedirs(PROCESSED_DIR, exist_ok=True)
+    print(f"--- 2. Serveur API lancé (uploads vers '{app.config['UPLOAD_FOLDER']}') ---")
+
+    # On lance SANS debug pour éviter le redémarrage qui cause l'erreur de connexion
+    app.run(debug=False, port=5000)

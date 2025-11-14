@@ -145,10 +145,11 @@
       // =========================================
       // 1. CONFIGURATION
       // =========================================
-      const API_PLANNING_URL = "http://localhost:5000/api/planning"; // Pour la vue RH (dispos)
-      const API_SCHEDULE_URL = "http://localhost:5000/api/my-schedule"; // NOUVEAU (planning employé)
+      const API_PLANNING_URL = "http://localhost:5000/api/planning";
+      const API_SCHEDULE_URL = "http://localhost:5000/api/my-schedule";
       const API_UPLOAD_URL = "http://localhost:5000/api/upload-contract";
       const API_APPROVE_URL = "http://localhost:5000/api/approve-plan";
+      const API_CHAT_URL = "http://localhost:5000/api/chat"; // URL du chat
       const RH_CODE = "RH2025";
       const DAYS_ORDER = ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam", "Dim"];
       
@@ -244,7 +245,8 @@
         if ($("#rh-code").value.trim() === RH_CODE) {
           $("#rh-code").value = "";
           hide("screen-home"); show("screen-rh");
-          currentRole = "rh"; updateChatRole(); show("chat-toggle");
+          currentRole = "rh"; // On définit le rôle
+          updateChatRole(); show("chat-toggle");
         } else { alert("Code incorrect (RH2025)"); }
       }
       $("#rh-validate").onclick = loginRH;
@@ -377,16 +379,14 @@
           }
       };
 
-      // --- LOGIN EMP (MODIFIÉ POUR L'ÉTAPE 5) ---
+      // --- LOGIN EMP (inchangé) ---
       let currentEmployee = null;
 
-      // NOUVELLE FONCTION pour remplir le tableau de l'employé
       function fillScheduleTable(tbody, schedule) {
-          tbody.innerHTML = ""; // Vide l'ancien tableau
+          tbody.innerHTML = "";
           
           const noTasksEl = $("#emp-no-tasks");
           if (schedule.length === 0) {
-              // Affiche le message si pas de tâches
               show("emp-no-tasks");
               return;
           }
@@ -399,31 +399,28 @@
               const td3 = document.createElement("td");
               
               td1.textContent = item.date;
-              td2.textContent = item.task; // Le nom de la tâche
-              td3.textContent = `${item.start}–${item.end}`; // Les horaires
+              td2.textContent = item.task;
+              td3.textContent = `${item.start}–${item.end}`;
               
               tr.append(td1, td2, td3);
               tbody.appendChild(tr);
           });
       }
 
-      // FONCTION DE LOGIN MISE À JOUR
       async function loginEmp() {
         const name = $("#emp-name").value;
         
-        // 1. On vérifie d'abord si l'employé existe (en utilisant l'index de loadData)
         const emp = index[norm(name)];
         if (!emp) { 
             alert("Prénom introuvable. Es-tu sûr qu'il est dans la base de données ?"); 
             return; 
         }
         
-        currentEmployee = emp;
+        currentEmployee = emp; // Stocke l'objet employé
         $("#emp-firstname").textContent = emp.name;
         $("#emp-role").textContent = emp.role;
         
         try {
-            // 2. On appelle la NOUVELLE API pour avoir le planning
             const response = await fetch(`${API_SCHEDULE_URL}?name=${encodeURIComponent(emp.name)}`);
             
             if (!response.ok) {
@@ -432,16 +429,13 @@
             }
             
             const scheduleData = await response.json();
-            
-            // 3. On remplit le tableau avec les TÂCHES
             fillScheduleTable(document.querySelector("#emp-table tbody"), scheduleData);
             
-            // 4. On affiche l'écran
             $("#emp-name").value = ""; 
             hide("screen-home"); 
             show("screen-emp");
-            currentRole = "emp"; 
-            updateChatRole(); // <-- L'appel qui plantait est maintenant corrigé
+            currentRole = "emp"; // Définit le rôle
+            updateChatRole(); 
             show("chat-toggle");
             
         } catch (error) {
@@ -453,9 +447,8 @@
       $("#emp-open").onclick = loginEmp;
       $("#emp-name").addEventListener("keyup", (e) => { if (e.key === "Enter") loginEmp(); });
       $("#emp-back").onclick = () => { hide("screen-emp"); show("screen-home"); currentRole = null; hide("chat-toggle"); };
-      // --- FIN DES MODIFICATIONS LOGIN EMP ---
 
-      // --- CHAT (CORRIGÉ : FONCTIONS RESTAURÉES) ---
+      // --- CHAT (CORRIGÉ : FONCTIONS RESTAURÉES ET MODIFIÉES) ---
       const chatBox = $("#chat-widget");
       const chatBtn = $("#chat-toggle");
       const chatBody = $("#chat-body");
@@ -466,46 +459,79 @@
       chatBtn.onclick = () => { chatBox.classList.toggle("chat-closed"); if(!chatBox.classList.contains("chat-closed")) { chatInput.focus(); maybeGreet(); }};
       $("#chat-close").onclick = () => chatBox.classList.add("chat-closed");
 
-      // --- CETTE FONCTION MANQUAIT ---
       function updateChatRole() {
         chatBody.innerHTML = "";
         chatTitle.textContent = currentRole === "emp" ? "Assistant RH" : "Assistant Admin";
         chatSub.textContent = currentRole === "emp" ? "Déclare une absence" : "Gestion";
       }
 
-      // --- CETTE FONCTION MANQUAIT ---
       function addMsg(who, text) {
         const d = document.createElement("div"); d.className = "msg " + (who==="user"?"from-user":"from-bot");
         d.innerHTML = `<div class="bubble">${text}</div>`; chatBody.appendChild(d); chatBody.scrollTop = chatBody.scrollHeight;
       }
       
-      // --- CETTE FONCTION MANQUAIT ---
       function maybeGreet() {
-        if (chatBody.children.length === 0) addMsg("bot", currentRole==='emp' ? `Bonjour ${currentEmployee.name} !` : "Bonjour !");
+        if (chatBody.children.length === 0) {
+            const msg = currentRole === 'emp' 
+              ? `Bonjour ${currentEmployee.name} ! Tu peux me demander un congé (ex: 'je pose des congés lundi prochain') ou déclarer une absence (ex: 'je suis malade demain').` 
+              : "Bonjour ! Le chat RH est en cours de développement.";
+            addMsg("bot", msg);
+        }
       }
 
-      $("#chat-form").addEventListener("submit", (e) => {
-        e.preventDefault(); const t = chatInput.value.trim(); if(!t) return;
-        addMsg("user", t); chatInput.value = "";
-        setTimeout(() => addMsg("bot", "Ceci est une démo connectée à la DB. Le chat n'est pas encore relié à l'IA."), 600);
+      // --- MODIFICATION: Gère les deux rôles (RH et Employé) ---
+      $("#chat-form").addEventListener("submit", async (e) => {
+        e.preventDefault(); 
+        const text = chatInput.value.trim(); 
+        if(!text) return;
+        
+        addMsg("user", text);
+        chatInput.value = "";
+        
+        // On affiche une petite bulle de chargement
+        addMsg("bot", "...");
+        
+        // On vérifie qui est en train de chatter
+        if (currentRole === 'emp') {
+            // L'employé est connecté -> On appelle l'API des absences
+            try {
+                const response = await fetch(API_CHAT_URL, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        message: text,
+                        // currentEmployee est garanti d'exister car currentRole == 'emp'
+                        employee_name: currentEmployee.name 
+                    })
+                });
+                
+                const data = await response.json();
+                
+                chatBody.removeChild(chatBody.lastChild); // On supprime la bulle "..."
+
+                if (data.error) {
+                    addMsg("bot", `Erreur: ${data.error}`);
+                } else {
+                    addMsg("bot", data.reply); // On affiche la réponse de l'IA/serveur
+                }
+                
+            } catch (err) {
+                chatBody.removeChild(chatBody.lastChild);
+                addMsg("bot", "Désolé, une erreur de connexion est survenue.");
+                console.error(err);
+            }
+        } else {
+            // Le RH est connecté -> L'API n'est pas (encore) faite pour lui.
+            // On renvoie une réponse simulée pour que l'interface fonctionne.
+            setTimeout(() => {
+                chatBody.removeChild(chatBody.lastChild); // On supprime la bulle "..."
+                addMsg("bot", "Le chat pour les RH est en cours de développement. Pour l'instant, je ne gère que les absences des employés.");
+            }, 600);
+        }
       });
       // --- FIN DE LA CORRECTION DU CHAT ---
 
     })();
   </script>
-  async function sendMessage() {
-    const input = document.querySelector('.chat-input input');
-    const userMessage = input.value;
-    input.value = '';
-
-    const response = await fetch('/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage })
-    });
-
-    const data = await response.json();
-    afficherMessage(data.reply); // Ajoute la réponse dans le chat
-}
 </body>
 </html>
