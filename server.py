@@ -11,7 +11,20 @@ import pdfplumber
 import shutil
 from datetime import datetime, date, timedelta  # Ajout
 import traceback  # Ajout
+from dotenv import load_dotenv
+import os
 
+# Charger le fichier .env
+load_dotenv()
+AZURE_KEY_CHATBOT = os.getenv("AZURE_KEY_CHATBOT")
+AZURE_ENDPOINT_CHATBOT = os.getenv("AZURE_ENDPOINT_CHATBOT")
+AZURE_OPENAI_KEY = os.getenv("AZURE_OPENAI_KEY_SECRET")
+
+if not AZURE_OPENAI_KEY:
+    print("ERREUR CRITIQUE: AZURE_OPENAI_KEY_SECRET n'est pas définie.")
+    exit()
+else:
+    print("Clé Azure chargée avec succès :", AZURE_OPENAI_KEY[:8], "...")  # Masque la clé
 # --- AJOUT: Importer le cerveau du Planificateur ---
 try:
     from Planificateur import (
@@ -409,6 +422,59 @@ def approve_plan():
 
 
 # --- 4. POINT DE DÉMARRAGE ---
+from flask import send_from_directory
+
+# --- ROUTE POUR LA PAGE D'ACCUEIL ---
+@app.route("/")
+def home():
+    return send_from_directory(".", "index.html")  # Sert index.html depuis le dossier racine
+
+# --- ROUTE POUR LES FICHIERS STATIQUES (CSS, JS, etc.) ---
+@app.route("/<path:path>")
+def static_files(path):
+    return send_from_directory(".", path)  # Sert styles.css, images, etc.
+
+@app.route('/api/chat', methods=['POST'])
+def chat_with_ai():
+    """
+    Reçoit un message du RH, appelle Azure OpenAI, et renvoie la réponse.
+    """
+    try:
+        user_message = request.json.get("message")
+        if not user_message:
+            return jsonify({"error": "Message manquant"}), 400
+
+        # Prompt pour guider l'IA
+        system_prompt = """
+        Tu es un assistant RH connecté à une base SQLite.
+        - Si l'utilisateur demande une modification (ajout de skill, absence), propose la requête SQL mais ne l'exécute pas sans confirmation.
+        - Réponds de manière claire et concise.
+        """
+
+        payload = {
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            "max_completion_tokens": 1024
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "api-key": AZURE_KEY_CHATBOT
+        }
+
+        response = requests.post(AZURE_ENDPOINT_CHATBOT, data=json.dumps(payload), headers=headers)
+        response.raise_for_status()
+        result = response.json()
+
+        ai_reply = result['choices'][0]['message']['content'].strip()
+        return jsonify({"reply": ai_reply})
+
+    except Exception as e:
+        print(f"Erreur dans /api/chat: {e}")
+        return jsonify({"error": str(e)}), 500
+
 if __name__ == '__main__':
     if not AZURE_OPENAI_KEY:
         print("ERREUR CRITIQUE: 'AZURE_OPENAI_KEY_SECRET' n'est pas définie.")

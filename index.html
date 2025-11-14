@@ -493,5 +493,19 @@
 
     })();
   </script>
+  async function sendMessage() {
+    const input = document.querySelector('.chat-input input');
+    const userMessage = input.value;
+    input.value = '';
+
+    const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage })
+    });
+
+    const data = await response.json();
+    afficherMessage(data.reply); // Ajoute la réponse dans le chat
+}
 </body>
 </html>
